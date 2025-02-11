@@ -1,38 +1,65 @@
 const { expect } = require("chai");
-const hre = require("hardhat");
+const { ethers } = require("hardhat");
 
 describe("AITUToken", function () {
-  let AITUToken, aitutoken, owner, addr1, addr2;
+  let Token, token, owner, addr1, addr2;
+  const initialSupply = 2000;
+  const tokenPrice = ethers.parseEther("0.001");
 
   beforeEach(async function () {
-    // Получаем ethers через hre
-    const { ethers } = hre;
     [owner, addr1, addr2] = await ethers.getSigners();
+    Token = await ethers.getContractFactory("AITUToken");
+    token = await Token.deploy();
+    await token.waitForDeployment();
 
-    // Деплоим контракт
-    AITUToken = await ethers.getContractFactory("AITUToken");
-    aitutoken = await AITUToken.deploy();
-    await aitutoken.waitForDeployment();
+    await owner.sendTransaction({
+      to: token.target,
+      value: ethers.parseEther("10"),
+    });
+
+    await owner.sendTransaction({
+      to: addr1.address,
+      value: ethers.parseEther("1"),
+    });
   });
 
-  it("should have correct initial supply", async function () {
-    const { ethers } = hre;
-    const totalSupply = await aitutoken.totalSupply();
-    expect(totalSupply).to.equal(ethers.parseUnits("2000", 18));
+  it("Should assign the total supply to the owner", async function () {
+    expect(await token.balanceOf(owner.address)).to.equal(ethers.parseUnits(initialSupply.toString(), 18));
   });
 
-  it("should transfer tokens correctly and log transaction", async function () {
-    const { ethers } = hre;
-    await aitutoken.transfer(addr1.address, ethers.parseUnits("100", 18));
+  it("Should allow users to buy tokens", async function () {
+    const amountToBuy = ethers.parseUnits("10", 18);
+    const requiredETH = (amountToBuy * tokenPrice) / ethers.parseUnits("1", 18);
 
-    const balance = await aitutoken.balanceOf(addr1.address);
-    expect(balance).to.equal(ethers.parseUnits("100", 18));
+    await token.connect(addr1).buyTokens(amountToBuy, { value: requiredETH });
 
-    const latestSender = await aitutoken.getLatestTransactionSender();
-    const latestReceiver = await aitutoken.getLatestTransactionReceiver();
+    expect(await token.balanceOf(addr1.address)).to.equal(amountToBuy);
+    expect(await token.balanceOf(owner.address)).to.equal(
+      ethers.parseUnits((initialSupply - 10).toString(), 18)
+    );
+  });
 
-    expect(latestSender).to.equal(owner.address);
-    expect(latestReceiver).to.equal(addr1.address);
+  it("Should revert if not enough ETH sent for buying", async function () {
+    const amountToBuy = ethers.parseUnits("10", 18);
+    const insufficientETH = (amountToBuy * tokenPrice) / ethers.parseUnits("1", 18) - 1n;
+
+    await expect(token.connect(addr1).buyTokens(amountToBuy, { value: insufficientETH }))
+      .to.be.revertedWith("Not enough ETH sent");
+  });
+
+  it("Should allow users to sell tokens", async function () {
+    const amountToBuy = ethers.parseUnits("10", 18);
+    const requiredETH = (amountToBuy * tokenPrice) / ethers.parseUnits("1", 18);
+
+    await token.connect(addr1).buyTokens(amountToBuy, { value: requiredETH });
+
+    await token.connect(addr1).sellTokens(amountToBuy);
+
+    expect(await token.balanceOf(addr1.address)).to.equal(0);
+  });
+
+  it("Should revert if not enough tokens to sell", async function () {
+    await expect(token.connect(addr1).sellTokens(ethers.parseUnits("10", 18)))
+      .to.be.revertedWith("Not enough tokens");
   });
 });
-

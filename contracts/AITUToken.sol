@@ -4,64 +4,51 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 contract AITUToken is ERC20 {
-    // Struct to store transaction details
-    struct TransactionInfo {
-        address sender;
-        address receiver;
-        uint256 amount;
-        uint256 timestamp;
-    }
+    address public owner;
+    uint256 public tokenPrice;
 
-    TransactionInfo[] public transactions;
+    event TokensPurchased(address indexed buyer, uint256 amount, uint256 cost);
+    event TokensSold(address indexed seller, uint256 amount, uint256 revenue);
 
     constructor() ERC20("AITUToken_SE2329", "AITU") {
-        // Mint initial supply of 2000 tokens (scaled by 18 decimals)
+        owner = msg.sender;
+        tokenPrice = 0.00001 ether;
         _mint(msg.sender, 2000 * 10 ** decimals());
     }
 
-    // Overridden transfer function to track transactions
-    function transfer(address to, uint256 amount) public override returns (bool) {
-        _logTransaction(msg.sender, to, amount);
-        return super.transfer(to, amount);
+    function buyTokens(uint256 amountToBuy) public payable {
+        require(amountToBuy > 0, "Amount must be greater than zero");
+        uint256 requiredETH = (amountToBuy * tokenPrice) / (10 ** decimals());
+        require(msg.value >= requiredETH, "Not enough ETH sent");
+        require(balanceOf(owner) >= amountToBuy, "Not enough tokens");
+
+        _transfer(owner, msg.sender, amountToBuy);
+
+        if (msg.value > requiredETH) {
+            (bool success, ) = msg.sender.call{value: msg.value - requiredETH}("");
+            require(success, "ETH refund failed");
+        }
+
+        emit TokensPurchased(msg.sender, amountToBuy, requiredETH);
     }
 
-    // Overridden transferFrom function to track transactions
-    function transferFrom(
-        address from,
-        address to,
-        uint256 amount
-    ) public override returns (bool) {
-        _logTransaction(from, to, amount);
-        return super.transferFrom(from, to, amount);
+    function sellTokens(uint256 amountAITU) public {
+        require(amountAITU > 0, "Amount must be greater than zero");
+        require(balanceOf(msg.sender) >= amountAITU, "Not enough tokens");
+
+        uint256 etherAmount = (amountAITU * tokenPrice) / (10 ** decimals());
+        require(address(this).balance >= etherAmount, "Not enough ETH in contract");
+
+        _transfer(msg.sender, owner, amountAITU);
+        (bool success, ) = payable(msg.sender).call{value: etherAmount}("");
+        require(success, "ETH transfer failed");
+
+        emit TokensSold(msg.sender, amountAITU, etherAmount);
     }
 
-    // Internal function to log transactions
-    function _logTransaction(address from, address to, uint256 amount) internal {
-        transactions.push(
-            TransactionInfo({
-                sender: from,
-                receiver: to,
-                amount: amount,
-                timestamp: block.timestamp
-            })
-        );
-    }
+    receive() external payable {}
 
-    // Function to return the latest transaction's block timestamp in a readable format
-    function getLatestTransactionTimestamp() public view returns (uint256) {
-        require(transactions.length > 0, "No transactions yet.");
-        return transactions[transactions.length - 1].timestamp;
-    }
-
-    // Function to retrieve sender of the latest transaction
-    function getLatestTransactionSender() public view returns (address) {
-        require(transactions.length > 0, "No transactions yet.");
-        return transactions[transactions.length - 1].sender;
-    }
-
-    // Function to retrieve receiver of the latest transaction
-    function getLatestTransactionReceiver() public view returns (address) {
-        require(transactions.length > 0, "No transactions yet.");
-        return transactions[transactions.length - 1].receiver;
+    function getContractBalance() external view returns (uint256) {
+        return address(this).balance;
     }
 }
